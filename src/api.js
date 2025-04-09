@@ -31,6 +31,13 @@ class apiWrapper {
         return await fetch(`${this.url}/user/steamprofiles?apiToken=${this.token}`, {
             method: 'get'
         }).then(response => response.json())
+          .then(json => {
+              // Check if json.data exists and is an array
+              if (json && json.data && Array.isArray(json.data)) {
+                  return json.data;
+              }
+              return json;
+          });
     }
 
     async getTasks(r4rSteamId) {

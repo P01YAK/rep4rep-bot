@@ -9,6 +9,27 @@ process.removeAllListeners('warning');
 
 dotenv.config();
 
+// Add console colors
+const colors = {
+    reset: '\x1b[0m',
+    red: '\x1b[31m',
+    green: '\x1b[32m',
+    white: '\x1b[37m'
+};
+
+// Create colored log functions
+function logInfo(message) {
+    console.log(`${colors.white}${message}${colors.reset}`);
+}
+
+function logSuccess(message) {
+    console.log(`${colors.green}${message}${colors.reset}`);
+}
+
+function logError(message) {
+    console.error(`${colors.red}${message}${colors.reset}`);
+}
+
 function askQuestion(query) {
     const readline = createInterface({
         input: process.stdin,
@@ -67,29 +88,29 @@ async function processAccount(account) {
             user.logOn(logOnOptions);
 
             user.on('loggedOn', async () => {
-                console.log(`[${account.login}] Successfully logged into the account.`);
+                logSuccess(`[${account.login}] Successfully logged into the account.`);
                 isLoggedOn = true;
 
                 user.setPersona(7);
 
                 user.on('webSession', async (sessionID, cookies) => {
                     community.setCookies(cookies);
-                    console.log(`[${account.login}] Web session obtained.`);
+                    logSuccess(`[${account.login}] Web session obtained.`);
 
                     await autoComment(user.steamID.getSteamID64(), account, community, accounts);
 
-                    console.log(`[${account.login}] Logging out of the account.`);
+                    logInfo(`[${account.login}] Logging out of the account.`);
                     user.logOff();
 
                     user.once('disconnected', () => {
-                        console.log(`[${account.login}] Logout completed.`);
+                        logInfo(`[${account.login}] Logout completed.`);
                         resolve();
                     });
                 });
             });
 
             user.on('refreshToken', (newToken) => {
-                console.log(`[${account.login}] New token received: ${newToken}`);
+                logSuccess(`[${account.login}] New token received: ${newToken}`);
                 updateAccount(accounts, account.login, { refreshToken: newToken });
                 isTokenRefreshed = true;
 
@@ -99,13 +120,13 @@ async function processAccount(account) {
             });
 
             user.on('error', (e) => {
-                console.error(`[${account.login}] Login error:`, e.message);
+                logError(`[${account.login}] Login error: ${e.message}`);
                 if (e.eresult === 5) {
-                    console.error(`[${account.login}] Incorrect password or account data.`);
+                    logError(`[${account.login}] Incorrect password or account data.`);
                 } else if (e.eresult === 63) {
-                    console.error(`[${account.login}] Account is locked due to Steam Guard. Check your email.`);
+                    logError(`[${account.login}] Account is locked due to Steam Guard. Check your email.`);
                 } else if (e.message.includes("You've been posting too frequently")) {
-                    console.error(`[${account.login}] Too frequent comments. Resetting the counter.`);
+                    logError(`[${account.login}] Too frequent comments. Resetting the counter.`);
                     updateAccount(accounts, account.login, { commentCounter: 0, lastComment: new Date().toISOString() });
                 }
                 reject(e);
@@ -116,13 +137,13 @@ async function processAccount(account) {
             }
         });
     } catch (error) {
-        console.error(`[${account.login}] Error processing account:`, error.message);
+        logError(`[${account.login}] Error processing account: ${error.message}`);
     }
 }
 
 async function autoComment(steamID, account, community, accounts) {
     try {
-        console.log(`[${account.login}] Starting the comment process...`);
+        logInfo(`[${account.login}] Starting the comment process...`);
 
         if (account.lastComment) {
             const lastCommentTime = new Date(account.lastComment).getTime();
@@ -131,7 +152,7 @@ async function autoComment(steamID, account, community, accounts) {
             const twentyFourHours = 24 * 60 * 60 * 1000;
 
             if (timeSinceLastComment < twentyFourHours) {
-                console.log(`[${account.login}] Not ready yet (last comment was less than 24 hours ago).`);
+                logInfo(`[${account.login}] Not ready yet (last comment was less than 24 hours ago).`);
                 return;
             }
         }
@@ -141,12 +162,26 @@ async function autoComment(steamID, account, community, accounts) {
         let repSteamProfiles = [];
         let repSteamProfilesObj = {};
 
-        console.log(`[${account.login}] Getting steam profiles from rep4rep...`);
-        const steamProfiles = await api.getSteamProfiles();
-
-        // Добавлена проверка на массив
-        if (!Array.isArray(steamProfiles)) {
-            console.error(`[${account.login}] Error: steamProfiles is not an array`);
+        logInfo(`[${account.login}] Getting steam profiles from rep4rep...`);
+        const steamProfilesResponse = await api.getSteamProfiles();
+        
+        let steamProfiles;
+        // Try to extract profiles from different possible response structures
+        if (typeof steamProfilesResponse === 'object') {
+            if (Array.isArray(steamProfilesResponse)) {
+                steamProfiles = steamProfilesResponse;
+            } else if (steamProfilesResponse.data && Array.isArray(steamProfilesResponse.data)) {
+                steamProfiles = steamProfilesResponse.data;
+            } else if (steamProfilesResponse.profiles && Array.isArray(steamProfilesResponse.profiles)) {
+                steamProfiles = steamProfilesResponse.profiles;
+            } else if (steamProfilesResponse.steamProfiles && Array.isArray(steamProfilesResponse.steamProfiles)) {
+                steamProfiles = steamProfilesResponse.steamProfiles;
+            } else {
+                logError(`[${account.login}] Error: steamProfiles is not in an expected format: ${JSON.stringify(steamProfilesResponse).substring(0, 200) + '...'}`);
+                return;
+            }
+        } else {
+            logError(`[${account.login}] Error: steamProfiles response is not an object: ${steamProfilesResponse}`);
             return;
         }
 
@@ -156,14 +191,28 @@ async function autoComment(steamID, account, community, accounts) {
         });
 
         if (!repSteamProfiles.includes(steamID)) {
-            console.log(`[${account.login}] Account not added to rep4rep! Adding now...`);
+            logInfo(`[${account.login}] Account not added to rep4rep! Adding now...`);
             await api.addSteamProfile(steamID);
-            console.log(`[${account.login}] Getting steam profiles after adding the profile...`);
-            const updatedSteamProfiles = await api.getSteamProfiles();
+            logInfo(`[${account.login}] Getting steam profiles after adding the profile...`);
+            const updatedSteamProfilesResponse = await api.getSteamProfiles();
 
-            // Добавлена проверка на массив
-            if (!Array.isArray(updatedSteamProfiles)) {
-                console.error(`[${account.login}] Error: updatedSteamProfiles is not an array`);
+            let updatedSteamProfiles;
+            // Try to extract profiles from different possible response structures
+            if (typeof updatedSteamProfilesResponse === 'object') {
+                if (Array.isArray(updatedSteamProfilesResponse)) {
+                    updatedSteamProfiles = updatedSteamProfilesResponse;
+                } else if (updatedSteamProfilesResponse.data && Array.isArray(updatedSteamProfilesResponse.data)) {
+                    updatedSteamProfiles = updatedSteamProfilesResponse.data;
+                } else if (updatedSteamProfilesResponse.profiles && Array.isArray(updatedSteamProfilesResponse.profiles)) {
+                    updatedSteamProfiles = updatedSteamProfilesResponse.profiles;
+                } else if (updatedSteamProfilesResponse.steamProfiles && Array.isArray(updatedSteamProfilesResponse.steamProfiles)) {
+                    updatedSteamProfiles = updatedSteamProfilesResponse.steamProfiles;
+                } else {
+                    logError(`[${account.login}] Error: updatedSteamProfiles is not in an expected format: ${JSON.stringify(updatedSteamProfilesResponse).substring(0, 200) + '...'}`);
+                    return;
+                }
+            } else {
+                logError(`[${account.login}] Error: updatedSteamProfiles response is not an object: ${updatedSteamProfilesResponse}`);
                 return;
             }
 
@@ -173,73 +222,61 @@ async function autoComment(steamID, account, community, accounts) {
             });
         }
 
-        console.log(`[${account.login}] Getting tasks...`);
+        logInfo(`[${account.login}] Getting tasks...`);
         const tasks = await api.getTasks(repSteamProfilesObj[steamID]);
         let successfulComments = 0;
         const maxComments = 10;
 
         for (const task of tasks) {
             if (successfulComments >= maxComments) {
-                console.log(`[${account.login}] Reached the limit of ${maxComments} comments. Stopping.`);
+                logInfo(`[${account.login}] Reached the limit of ${maxComments} comments. Stopping.`);
                 break;
             }
 
-            let attemptCount = 0;
-            const maxAttempts = 1;
+            logInfo(
+                `[${account.login}] Posting a comment on the profile: https://steamcommunity.com/profiles/${task.targetSteamProfileId}\nComment: ${task.requiredCommentText}`
+            );
 
-            while (attemptCount < maxAttempts) {
-                console.log(
-                    `[${account.login}] Posting a comment on the profile: https://steamcommunity.com/profiles/${task.targetSteamProfileId}\nComment: ${task.requiredCommentText}`
-                );
-
-                const result = await new Promise((resolve) => {
-                    community.postUserComment(task.targetSteamProfileId, task.requiredCommentText, (err) => {
-                        if (err) {
-                            console.log(`[${account.login}] Failed to post a comment on the profile: ${task.targetSteamProfileId}`);
-                            console.log(err.message);
-                            if (err.message.includes("The settings on this account do not allow you to add comments")) {
-                                console.log(`[${account.login}] Retrying due to comment restrictions... (${attemptCount + 1}/${maxAttempts})`);
-                                resolve(null);
-                            } else if (err.message.includes("You've been posting too frequently")) {
-                                console.log(`[${account.login}] Too frequent comments. Stopping the account.`);
-                                updateAccount(accounts, account.login, { commentCounter: 0, lastComment: new Date().toISOString() });
-                                resolve(false);
-                            } else {
-                                console.log(`[${account.login}] Retrying due to an unknown error... (${attemptCount + 1}/${maxAttempts})`);
-                                resolve(null);
-                            }
+            const result = await new Promise((resolve) => {
+                community.postUserComment(task.targetSteamProfileId, task.requiredCommentText, (err) => {
+                    if (err) {
+                        logError(`[${account.login}] Failed to post a comment on the profile: ${task.targetSteamProfileId}`);
+                        logError(err.message);
+                        if (err.message.includes("The settings on this account do not allow you to add comments")) {
+                            logInfo(`[${account.login}] Profile is private. Moving to the next task.`);
+                            resolve(false);
+                        } else if (err.message.includes("You've been posting too frequently")) {
+                            logError(`[${account.login}] Too frequent comments. Stopping the account.`);
+                            updateAccount(accounts, account.login, { commentCounter: 0, lastComment: new Date().toISOString() });
+                            resolve("stop");
                         } else {
-                            console.log(`[${account.login}] Comment posted successfully!`);
-                            resolve(true);
+                            logInfo(`[${account.login}] Unable to post comment. Moving to the next task.`);
+                            resolve(false);
                         }
-                    });
+                    } else {
+                        logSuccess(`[${account.login}] Comment posted successfully!`);
+                        resolve(true);
+                    }
                 });
+            });
 
-                if (result === false) {
-                    console.log(`[${account.login}] Stopping the account due to a critical error.`);
-                    return;
-                } else if (result === true) {
-                    await api.completeTask(task.taskId, task.requiredCommentId, repSteamProfilesObj[steamID]);
-                    console.log(`[${account.login}] The comment will be reviewed shortly...`);
-                    successfulComments++;
-                    break;
-                } else {
-                    attemptCount++;
-                    await sleep(5000);
-                }
-            }
-
-            if (attemptCount >= maxAttempts) {
-                console.log(`[${account.login}] Reached the maximum number of attempts. Skipping this task.`);
+            if (result === "stop") {
+                break;
+            } else if (result === false) {
+                // Just move to the next task
+            } else if (result === true) {
+                await api.completeTask(task.taskId, task.requiredCommentId, repSteamProfilesObj[steamID]);
+                logSuccess(`[${account.login}] The comment will be reviewed shortly...`);
+                successfulComments++;
             }
 
             await sleep(15000);
         }
 
-        console.log(`[${account.login}] Comment process completed.`);
+        logSuccess(`[${account.login}] Comment process completed.`);
         updateAccount(accounts, account.login, { lastComment: new Date().toISOString() });
     } catch (error) {
-        console.error(`[${account.login}] Error in the auto comment function for SteamID: ${steamID}:`, error.message);
+        logError(`[${account.login}] Error in the auto comment function for SteamID: ${steamID}: ${error.message}`);
     }
 }
 
@@ -251,7 +288,7 @@ async function startWork() {
     const accounts = loadAccounts();
     for (const account of accounts) {
         if (!account.steamID) {
-            console.log(`[${account.login}] No SteamID for the account. Skipping.`);
+            logInfo(`[${account.login}] No SteamID for the account. Skipping.`);
             continue;
         }
 
@@ -262,7 +299,7 @@ async function startWork() {
             const twentyFourHours = 24 * 60 * 60 * 1000;
 
             if (timeSinceLastComment < twentyFourHours) {
-                console.log(`[${account.login}] Not ready yet (last comment was less than 24 hours ago). Skipping.`);
+                logInfo(`[${account.login}] Not ready yet (last comment was less than 24 hours ago). Skipping.`);
                 continue;
             }
         }
@@ -275,13 +312,13 @@ async function addAccount() {
         const credentials = await askQuestion('Enter login:pass: ');
         const [username, password] = credentials.split(':');
         if (!username || !password) {
-            console.error('Invalid format. Enter data in the format login:pass.');
+            logError('Invalid format. Enter data in the format login:pass.');
             return;
         }
 
         const accounts = loadAccounts();
         if (getAccount(accounts, username)) {
-            console.error(`[${username}] Account already exists.`);
+            logError(`[${username}] Account already exists.`);
             return;
         }
 
@@ -296,69 +333,73 @@ async function addAccount() {
             let refreshToken = null;
 
             user.on('loggedOn', async () => {
-                console.log(`[${username}] Successfully logged into the account.`);
+                logSuccess(`[${username}] Successfully logged into the account.`);
                 steamID = user.steamID.getSteamID64();
-                console.log(`[${username}] Received SteamID: ${steamID}`);
+                logSuccess(`[${username}] Received SteamID: ${steamID}`);
 
                 if (refreshToken) {
                     const accountData = { login: username, password, refreshToken, commentCounter: 0, lastComment: null, steamID };
                     updateAccount(accounts, username, accountData);
-                    console.log(`[${username}] Account successfully added with SteamID: ${steamID} and refreshToken.`);
+                    logSuccess(`[${username}] Account successfully added with SteamID: ${steamID} and refreshToken.`);
                     resolve();
                 }
             });
 
             user.on('refreshToken', (newToken) => {
-                console.log(`[${username}] New token received: ${newToken}`);
+                logSuccess(`[${username}] New token received: ${newToken}`);
                 refreshToken = newToken;
 
                 if (steamID) {
                     const accountData = { login: username, password, refreshToken, commentCounter: 0, lastComment: null, steamID };
                     updateAccount(accounts, username, accountData);
-                    console.log(`[${username}] Account successfully added with SteamID: ${steamID} and refreshToken.`);
+                    logSuccess(`[${username}] Account successfully added with SteamID: ${steamID} and refreshToken.`);
                     resolve();
                 }
             });
 
             user.on('error', (e) => {
-                console.error(`[${username}] Login error:`, e.message);
+                logError(`[${username}] Login error: ${e.message}`);
                 if (e.eresult === 5) {
-                    console.error(`[${username}] Incorrect password or account data.`);
+                    logError(`[${username}] Incorrect password or account data.`);
                 } else if (e.eresult === 63) {
-                    console.error(`[${username}] Account is locked due to Steam Guard. Check your email.`);
+                    logError(`[${username}] Account is locked due to Steam Guard. Check your email.`);
                 } else if (e.message.includes("You've been posting too frequently")) {
-                    console.error(`[${username}] Too frequent comments. Resetting the counter.`);
+                    logError(`[${username}] Too frequent comments. Resetting the counter.`);
                     updateAccount(accounts, username, { commentCounter: 0, lastComment: new Date().toISOString() });
                 }
                 reject(e);
             });
 
             user.on('disconnected', () => {
-                console.log(`[${username}] Logout completed.`);
+                logInfo(`[${username}] Logout completed.`);
             });
         });
     } catch (error) {
-        console.error('An error occurred:', error.message);
+        logError(`[${username}] Error adding account: ${error.message}`);
     }
 }
 
 function viewAccounts() {
     const accounts = loadAccounts();
-    console.log('List of accounts:');
+    logInfo('List of accounts:');
     accounts.forEach((account) => {
         const lastComment = account.lastComment ? new Date(account.lastComment).toLocaleString() : 'Not set';
         const canPostComments = account.lastComment ? Date.now() - new Date(account.lastComment).getTime() > 24 * 60 * 60 * 1000 : true;
-        console.log(`Login: ${account.login}, SteamID: ${account.steamID || 'Not set'}, Allowed to post comments: ${canPostComments ? 'Yes' : 'No (last comment: ' + lastComment + ')'}`);
+        if (canPostComments) {
+            logSuccess(`Login: ${account.login}, SteamID: ${account.steamID || 'Not set'}, Allowed to post comments: Yes`);
+        } else {
+            logInfo(`Login: ${account.login}, SteamID: ${account.steamID || 'Not set'}, Allowed to post comments: No (last comment: ${lastComment})`);
+        }
     });
 }
 
 async function main() {
     while (true) {
-        console.log('\nChoose an action:');
-        console.log('1 - Start work');
-        console.log('2 - Add accounts');
-        console.log('3 - View accounts');
-        console.log('0 - Exit');
+        logInfo('\nChoose an action:');
+        logInfo('1 - Start work');
+        logInfo('2 - Add accounts');
+        logInfo('3 - View accounts');
+        logInfo('0 - Exit');
 
         const choice = await askQuestion('Enter the action number: ');
 
@@ -373,10 +414,10 @@ async function main() {
                 viewAccounts();
                 break;
             case '0':
-                console.log('Exiting the program.');
+                logSuccess('Exiting the program.');
                 process.exit(0);
             default:
-                console.error('Invalid choice. Try again.');
+                logError('Invalid choice. Try again.');
         }
     }
 }
