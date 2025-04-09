@@ -185,7 +185,7 @@ async function autoComment(steamID, account, community, accounts) {
             }
 
             let attemptCount = 0;
-            const maxAttempts = 3;
+            const maxAttempts = 1;
 
             while (attemptCount < maxAttempts) {
                 console.log(
