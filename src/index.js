@@ -81,7 +81,6 @@ async function processAccount(account) {
                     console.log(`[${account.login}] Logging out of the account.`);
                     user.logOff();
 
-                    // Use `once` to ensure the event is handled only once
                     user.once('disconnected', () => {
                         console.log(`[${account.login}] Logout completed.`);
                         resolve();
@@ -144,6 +143,13 @@ async function autoComment(steamID, account, community, accounts) {
 
         console.log(`[${account.login}] Getting steam profiles from rep4rep...`);
         const steamProfiles = await api.getSteamProfiles();
+
+        // Добавлена проверка на массив
+        if (!Array.isArray(steamProfiles)) {
+            console.error(`[${account.login}] Error: steamProfiles is not an array`);
+            return;
+        }
+
         steamProfiles.forEach((steamProfile) => {
             repSteamProfiles.push(steamProfile.steamId);
             repSteamProfilesObj[steamProfile.steamId] = steamProfile.id;
@@ -154,6 +160,13 @@ async function autoComment(steamID, account, community, accounts) {
             await api.addSteamProfile(steamID);
             console.log(`[${account.login}] Getting steam profiles after adding the profile...`);
             const updatedSteamProfiles = await api.getSteamProfiles();
+
+            // Добавлена проверка на массив
+            if (!Array.isArray(updatedSteamProfiles)) {
+                console.error(`[${account.login}] Error: updatedSteamProfiles is not an array`);
+                return;
+            }
+
             updatedSteamProfiles.forEach((steamProfile) => {
                 repSteamProfiles.push(steamProfile.steamId);
                 repSteamProfilesObj[steamProfile.steamId] = steamProfile.id;
